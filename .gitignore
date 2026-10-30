@@ -1,0 +1,11 @@
+# Herramientas de agentes y configuración local de Claude Code
+.agents/
+.claude/
+skills-lock.json
+
+# Node / Wrangler (cubiertos también en cloudflare-llamadas-demo/.gitignore)
+node_modules/
+.wrangler/
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
