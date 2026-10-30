@@ -108,7 +108,7 @@ describe("métodos y rutas", () => {
     expect(res.headers.get("Allow")).toBe("GET, OPTIONS");
   });
 
-  it.each(["/", "/api", "/api/llamadas", "/api/llamadas/1/extra", "/otra/ruta"])(
+  it.each(["/", "/api", "/api/llamadas/1/extra", "/otra/ruta"])(
     "GET %s devuelve 404",
     async (path) => {
       const res = await SELF.fetch(`${BASE}${path}`, { headers: AUTH });

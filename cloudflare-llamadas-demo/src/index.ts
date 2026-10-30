@@ -1,9 +1,10 @@
 import { esPeticionAutorizada } from "./middleware/auth";
-import { manejarLlamada, METODOS_PERMITIDOS } from "./routes/llamadas";
+import { manejarBusquedaLlamada, manejarLlamada, METODOS_PERMITIDOS } from "./routes/llamadas";
 import type { Env } from "./types/llamada";
 import { json, methodNotAllowed, notFound, options, unauthorized } from "./utils/responses";
 
 const RUTA_HEALTH = /^\/api\/health\/?$/;
+const RUTA_LLAMADAS = /^\/api\/llamadas\/?$/;
 const RUTA_LLAMADA = /^\/api\/llamadas\/([^/]+)\/?$/;
 
 function manejarHealth(request: Request): Response {
@@ -17,6 +18,11 @@ function manejarHealth(request: Request): Response {
   }
 }
 
+/** OPTIONS (descubrimiento de métodos) no requiere autenticación; el resto sí. */
+function requiereAutenticacion(request: Request): boolean {
+  return request.method !== "OPTIONS";
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const { pathname } = new URL(request.url);
@@ -25,10 +31,16 @@ export default {
       return manejarHealth(request);
     }
 
+    if (RUTA_LLAMADAS.test(pathname)) {
+      if (requiereAutenticacion(request) && !esPeticionAutorizada(request, env)) {
+        return unauthorized();
+      }
+      return manejarBusquedaLlamada(request);
+    }
+
     const match = RUTA_LLAMADA.exec(pathname);
     if (match !== null) {
-      // OPTIONS (descubrimiento de métodos) no requiere autenticación; el resto sí.
-      if (request.method !== "OPTIONS" && !esPeticionAutorizada(request, env)) {
+      if (requiereAutenticacion(request) && !esPeticionAutorizada(request, env)) {
         return unauthorized();
       }
       return manejarLlamada(request, decodeURIComponent(match[1]));

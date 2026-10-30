@@ -59,8 +59,21 @@ npm run typecheck
 | ------ | ----------------------------- | ------------- | ------------------------------------- |
 | GET    | `/api/health`                 | No            | Estado de la API                      |
 | GET    | `/api/llamadas/{llamada_id}`  | `X-API-Key`   | Datos de la llamada (entero positivo) |
+| POST   | `/api/llamadas`               | `X-API-Key`   | Mismos datos, con el ID en el cuerpo  |
 
 Todas las respuestas llevan `Content-Type: application/json; charset=utf-8`.
+
+### POST /api/llamadas
+
+Alternativa al GET para sistemas que prefieren enviar el identificador en el cuerpo. El cuerpo debe ser un objeto JSON con el campo `llamada_id` (entero positivo, como número o como cadena de dígitos):
+
+```json
+{ "llamada_id": 2 }
+```
+
+Responde exactamente lo mismo que `GET /api/llamadas/2`. Los errores 401, 404 y 405 son los mismos; además devuelve 400 `CUERPO_INVALIDO` si el cuerpo no es un objeto JSON válido y 400 `ID_INVALIDO` si falta `llamada_id` o no es un entero positivo.
+
+Registros de prueba disponibles: `llamada_id` 1 (candidato Miguel Maldonado, referencia Gabriel Duque en Jabil Chihuahua) y `llamada_id` 2 (candidato Jair Hernandez, referencia Guillermo Siller en Avattar Consulting).
 
 ### Ejemplos con curl
 
@@ -76,6 +89,10 @@ curl -H "X-API-Key: mi-clave-local" http://localhost:8787/api/llamadas/999
 
 # Identificador inválido -> 400
 curl -H "X-API-Key: mi-clave-local" http://localhost:8787/api/llamadas/abc
+
+# Búsqueda por POST con el ID en el cuerpo
+curl -X POST -H "X-API-Key: mi-clave-local" -H "Content-Type: application/json" \
+  -d '{"llamada_id": 2}' http://localhost:8787/api/llamadas
 
 # Sin API Key o con clave incorrecta -> 401
 curl http://localhost:8787/api/llamadas/1
@@ -136,13 +153,14 @@ Todos los errores comparten el mismo formato:
 
 | HTTP | `code`                  | Cuándo                                              |
 | ---- | ----------------------- | --------------------------------------------------- |
-| 400  | `ID_INVALIDO`           | El identificador no es un entero positivo           |
+| 400  | `ID_INVALIDO`           | El identificador no es un entero positivo (o falta `llamada_id` en el POST) |
+| 400  | `CUERPO_INVALIDO`       | El cuerpo del POST no es un objeto JSON válido      |
 | 401  | `NO_AUTORIZADO`         | Falta el header `X-API-Key` o la clave es incorrecta |
 | 404  | `LLAMADA_NO_ENCONTRADA` | El identificador es válido pero no existe           |
 | 404  | `RUTA_NO_ENCONTRADA`    | La ruta no está implementada                        |
-| 405  | `METODO_NO_PERMITIDO`   | Se usó POST, PUT, PATCH o DELETE (header `Allow`)   |
+| 405  | `METODO_NO_PERMITIDO`   | Método no admitido en esa ruta (ver header `Allow`) |
 
-`OPTIONS` responde 204 con el header `Allow: GET, OPTIONS` y no requiere autenticación.
+`OPTIONS` responde 204 con el header `Allow` correspondiente (`GET, OPTIONS` en `/api/llamadas/{id}`, `POST, OPTIONS` en `/api/llamadas`) y no requiere autenticación.
 
 ## Desplegar en Cloudflare Workers
 
@@ -183,13 +201,14 @@ Los registros viven en memoria en [src/data/llamadas.ts](src/data/llamadas.ts). 
 ```
 src/
   index.ts              Punto de entrada: enrutamiento y manejo de métodos
-  routes/llamadas.ts    Validación del ID y lógica del endpoint de llamadas
+  routes/llamadas.ts    Validación del ID y lógica de GET /api/llamadas/{id} y POST /api/llamadas
   data/llamadas.ts      Registros ficticios en memoria
   middleware/auth.ts    Verificación de X-API-Key (comparación en tiempo constante)
   utils/responses.ts    Respuestas JSON y errores con formato uniforme
   types/llamada.ts      Contrato de datos y tipado del entorno
 tests/
-  llamadas.test.ts      Endpoints, validación, métodos y rutas
+  llamadas.test.ts      GET por ID, validación, métodos y rutas
+  busqueda.test.ts      POST con llamada_id en el cuerpo y registro 2
   auth.test.ts          Autenticación
 vitest.config.ts        Configuración de Vitest para el runtime de Workers
 wrangler.jsonc          Configuración del Worker

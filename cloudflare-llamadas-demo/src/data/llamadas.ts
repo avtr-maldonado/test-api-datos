@@ -42,6 +42,37 @@ const LLAMADAS: readonly Llamada[] = [
     },
     verificar_identidad: true,
   },
+  {
+    llamada_id: 2,
+    empresa_contratante: "Avattar IT Solutions",
+    candidato: {
+      nombre: "Jair Hernandez",
+      puesto_vacante: "Analista de Datos",
+      reclutador: "Estrella Sagredo",
+      telefono_rh: "+52 55 0000 1100",
+    },
+    consentimiento: {
+      folio: "CONS-2026-0157",
+      fecha_firma: "2026-10-29",
+    },
+    referencia: {
+      nombre: "Guillermo Siller",
+      puesto_declarado: "Gerente de Consultoria",
+      relacion_declarada: "Jefe directo",
+      empresa: "Avattar Consulting",
+      telefono: "+52 81 0000 2200",
+      extension: "104",
+      fuente_telefono: "Proporcionado por el candidato (no verificado)",
+      horario_preferido: "Lunes a viernes de 10:00 a 14:00",
+    },
+    datos_a_verificar: {
+      empresa: "Avattar Consulting",
+      puesto: "Analista de Datos Jr",
+      periodo: "marzo de 2023 a agosto de 2025",
+      relacion: "Jefe directo",
+    },
+    verificar_identidad: true,
+  },
 ];
 
 /** Índice por identificador para búsquedas directas. */

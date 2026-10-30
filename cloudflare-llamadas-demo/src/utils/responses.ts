@@ -25,8 +25,8 @@ export function error(
   return json({ success: false, error: { code, message } }, status, extraHeaders);
 }
 
-export function badRequest(message: string): Response {
-  return error(400, "ID_INVALIDO", message);
+export function badRequest(message: string, code = "ID_INVALIDO"): Response {
+  return error(400, code, message);
 }
 
 export function unauthorized(): Response {
