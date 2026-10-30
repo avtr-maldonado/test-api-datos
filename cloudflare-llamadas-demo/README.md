@@ -2,7 +2,7 @@
 
 API REST de pruebas desplegada en Cloudflare Workers que **simula** el sistema de origen de una plataforma de verificación de referencias laborales. Un sistema externo consulta esta API por HTTP GET con el identificador de una llamada y recibe los datos asociados en JSON.
 
-> Esta versión es únicamente un simulador. No realiza llamadas telefónicas, no usa modelos de IA ni se conecta a bases de datos. Todos los datos son **ficticios**: no contactar a los teléfonos incluidos ni asumir que las personas o empresas sean referencias reales.
+> Esta versión es únicamente un simulador. No realiza llamadas telefónicas ni usa modelos de IA. Los datos de las llamadas viven en memoria; las respuestas recopiladas se guardan en Workers KV. Todos los datos son **ficticios**: no contactar a los teléfonos incluidos ni asumir que las personas o empresas sean referencias reales.
 
 ## Requisitos
 
@@ -60,6 +60,8 @@ npm run typecheck
 | GET    | `/api/health`                 | No            | Estado de la API                      |
 | GET    | `/api/llamadas/{llamada_id}`  | `X-API-Key`   | Datos de la llamada (entero positivo) |
 | POST   | `/api/llamadas`               | `X-API-Key`   | Mismos datos, con el ID en el cuerpo  |
+| POST   | `/api/respuestas`             | `X-API-Key`   | Guarda las 9 respuestas de una llamada |
+| GET    | `/api/respuestas/{llamada_id}` | `X-API-Key`  | Recupera las respuestas guardadas     |
 
 Todas las respuestas llevan `Content-Type: application/json; charset=utf-8`.
 
@@ -74,6 +76,50 @@ Alternativa al GET para sistemas que prefieren enviar el identificador en el cue
 Responde exactamente lo mismo que `GET /api/llamadas/2`. Los errores 401, 404 y 405 son los mismos; además devuelve 400 `CUERPO_INVALIDO` si el cuerpo no es un objeto JSON válido y 400 `ID_INVALIDO` si falta `llamada_id` o no es un entero positivo.
 
 Registros de prueba disponibles: `llamada_id` 1 (candidato Miguel Maldonado, referencia Gabriel Duque en Jabil Chihuahua) y `llamada_id` 2 (candidato Jair Hernandez, referencia Guillermo Siller en Avattar Consulting).
+
+### POST /api/respuestas
+
+Guarda las respuestas obtenidas en una llamada. Se almacenan en Workers KV bajo la clave `respuestas:{llamada_id}`; un segundo POST para la misma llamada sobrescribe el anterior.
+
+```json
+{
+  "llamada_id": 2,
+  "respuestas": [
+    { "pregunta": 1, "texto": "¿Confirma que trabajó con usted?", "respuesta": "Sí" },
+    { "pregunta": 2, "texto": "¿En qué periodo?", "respuesta": "Marzo 2023 a agosto 2025" },
+    { "pregunta": 3, "texto": "...", "respuesta": "..." },
+    { "pregunta": 4, "texto": "...", "respuesta": "..." },
+    { "pregunta": 5, "texto": "...", "respuesta": "..." },
+    { "pregunta": 6, "texto": "...", "respuesta": "..." },
+    { "pregunta": 7, "texto": "...", "respuesta": "..." },
+    { "pregunta": 8, "texto": "...", "respuesta": "..." },
+    { "pregunta": 9, "texto": "...", "respuesta": "..." }
+  ]
+}
+```
+
+Reglas de validación:
+
+- `llamada_id` debe ser un entero positivo y la llamada debe existir (si no, 404 `LLAMADA_NO_ENCONTRADA`).
+- `respuestas` debe traer exactamente 9 elementos, con `pregunta` del 1 al 9 sin repetir y `texto` y `respuesta` como cadenas (máximo 2000 caracteres). Si no, 400 `RESPUESTAS_INVALIDAS` con un mensaje que indica el problema.
+- El número de preguntas se define en la constante `NUM_PREGUNTAS` de [src/types/respuestas.ts](src/types/respuestas.ts).
+
+Responde 201 con el registro guardado, ordenado por número de pregunta y con la fecha de recepción:
+
+```json
+{
+  "success": true,
+  "data": {
+    "llamada_id": 2,
+    "respuestas": [ ... ],
+    "recibido_en": "2026-10-30T23:40:12.345Z"
+  }
+}
+```
+
+### GET /api/respuestas/{llamada_id}
+
+Devuelve el objeto `data` guardado por el POST, o 404 `RESPUESTAS_NO_ENCONTRADAS` si aún no hay respuestas para esa llamada.
 
 ### Ejemplos con curl
 
@@ -93,6 +139,13 @@ curl -H "X-API-Key: mi-clave-local" http://localhost:8787/api/llamadas/abc
 # Búsqueda por POST con el ID en el cuerpo
 curl -X POST -H "X-API-Key: mi-clave-local" -H "Content-Type: application/json" \
   -d '{"llamada_id": 2}' http://localhost:8787/api/llamadas
+
+# Guardar respuestas (el cuerpo completo está en la sección POST /api/respuestas)
+curl -X POST -H "X-API-Key: mi-clave-local" -H "Content-Type: application/json" \
+  -d @respuestas.json http://localhost:8787/api/respuestas
+
+# Recuperar respuestas guardadas
+curl -H "X-API-Key: mi-clave-local" http://localhost:8787/api/respuestas/2
 
 # Sin API Key o con clave incorrecta -> 401
 curl http://localhost:8787/api/llamadas/1
@@ -155,12 +208,38 @@ Todos los errores comparten el mismo formato:
 | ---- | ----------------------- | --------------------------------------------------- |
 | 400  | `ID_INVALIDO`           | El identificador no es un entero positivo (o falta `llamada_id` en el POST) |
 | 400  | `CUERPO_INVALIDO`       | El cuerpo del POST no es un objeto JSON válido      |
+| 400  | `RESPUESTAS_INVALIDAS`  | La lista de respuestas no cumple las reglas         |
+| 404  | `RESPUESTAS_NO_ENCONTRADAS` | No hay respuestas guardadas para esa llamada    |
 | 401  | `NO_AUTORIZADO`         | Falta el header `X-API-Key` o la clave es incorrecta |
 | 404  | `LLAMADA_NO_ENCONTRADA` | El identificador es válido pero no existe           |
 | 404  | `RUTA_NO_ENCONTRADA`    | La ruta no está implementada                        |
 | 405  | `METODO_NO_PERMITIDO`   | Método no admitido en esa ruta (ver header `Allow`) |
 
-`OPTIONS` responde 204 con el header `Allow` correspondiente (`GET, OPTIONS` en `/api/llamadas/{id}`, `POST, OPTIONS` en `/api/llamadas`) y no requiere autenticación.
+`OPTIONS` responde 204 con el header `Allow` correspondiente (`GET, OPTIONS` en las rutas con `{id}`, `POST, OPTIONS` en `/api/llamadas` y `/api/respuestas`) y no requiere autenticación.
+
+## Almacenamiento de respuestas (Workers KV)
+
+Las respuestas se guardan en un namespace de Workers KV enlazado al Worker como `RESPUESTAS`. **En local no hay que configurar nada**: `npm run dev` y `npm test` usan un KV simulado en disco (dentro de `.wrangler/`, ignorado por git).
+
+Para desplegar hace falta crear el namespace una sola vez:
+
+```bash
+npx wrangler kv namespace create RESPUESTAS
+```
+
+Wrangler devuelve un `id`. Cópialo en `wrangler.jsonc` sustituyendo el valor `REEMPLAZA_CON_EL_ID_DE_TU_NAMESPACE`:
+
+```jsonc
+"kv_namespaces": [
+  { "binding": "RESPUESTAS", "id": "<id devuelto por wrangler>" }
+]
+```
+
+Después despliega con normalidad. Para ver lo guardado, entra en el panel de Cloudflare a **Storage & Databases**, **KV**, y abre el namespace; o desde la terminal:
+
+```bash
+npx wrangler kv key get --binding RESPUESTAS "respuestas:2" --remote
+```
 
 ## Desplegar en Cloudflare Workers
 
@@ -202,6 +281,8 @@ Los registros viven en memoria en [src/data/llamadas.ts](src/data/llamadas.ts). 
 src/
   index.ts              Punto de entrada: enrutamiento y manejo de métodos
   routes/llamadas.ts    Validación del ID y lógica de GET /api/llamadas/{id} y POST /api/llamadas
+  routes/respuestas.ts  Validación y guardado/lectura de respuestas en KV
+  types/respuestas.ts   Contrato de las respuestas y NUM_PREGUNTAS
   data/llamadas.ts      Registros ficticios en memoria
   middleware/auth.ts    Verificación de X-API-Key (comparación en tiempo constante)
   utils/responses.ts    Respuestas JSON y errores con formato uniforme
@@ -209,6 +290,7 @@ src/
 tests/
   llamadas.test.ts      GET por ID, validación, métodos y rutas
   busqueda.test.ts      POST con llamada_id en el cuerpo y registro 2
+  respuestas.test.ts    Guardado y lectura de respuestas en KV
   auth.test.ts          Autenticación
 vitest.config.ts        Configuración de Vitest para el runtime de Workers
 wrangler.jsonc          Configuración del Worker

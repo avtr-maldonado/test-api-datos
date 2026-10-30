@@ -2,5 +2,6 @@
 declare namespace Cloudflare {
   interface Env {
     API_KEY: string;
+    RESPUESTAS: KVNamespace;
   }
 }

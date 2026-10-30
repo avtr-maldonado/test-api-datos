@@ -48,4 +48,6 @@ export interface Llamada {
 export interface Env {
   /** Secreto configurado con `wrangler secret put API_KEY` o en `.dev.vars`. */
   API_KEY?: string;
+  /** Namespace de Workers KV donde se guardan las respuestas (ver wrangler.jsonc). */
+  RESPUESTAS: KVNamespace;
 }

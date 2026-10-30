@@ -1,14 +1,25 @@
 {
-  // Configuración principal del Worker.
-  // Documentación: https://developers.cloudflare.com/workers/wrangler/configuration/
-  "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "cloudflare-llamadas-demo",
-  "main": "src/index.ts",
-  "compatibility_date": "2025-10-01",
-  "observability": {
-    "enabled": true
-  }
-  // El secreto API_KEY NO se define aquí.
-  //  - Local:      archivo .dev.vars (ver .dev.vars.example)
-  //  - Producción: npx wrangler secret put API_KEY
+	// Configuración principal del Worker.
+	// Documentación: https://developers.cloudflare.com/workers/wrangler/configuration/
+	"$schema": "node_modules/wrangler/config-schema.json",
+	"name": "cloudflare-llamadas-demo",
+	"main": "src/index.ts",
+	"compatibility_date": "2025-10-01",
+	"observability": {
+		"enabled": true
+	},
+	// Workers KV donde se guardan las respuestas recopiladas (POST /api/respuestas).
+	// Crea el namespace con:  npx wrangler kv namespace create RESPUESTAS
+	// y sustituye el "id" por el que devuelva Wrangler antes de desplegar.
+	// En local (npm run dev y npm test) se usa un KV simulado y este id no importa.
+	"kv_namespaces": [
+		{
+			"binding": "RESPUESTAS",
+			"id": "b2e85db198524300abad684dd5ad365e",
+			"remote": true
+		}
+	]
+	// El secreto API_KEY NO se define aquí.
+	//  - Local:      archivo .dev.vars (ver .dev.vars.example)
+	//  - Producción: npx wrangler secret put API_KEY
 }
