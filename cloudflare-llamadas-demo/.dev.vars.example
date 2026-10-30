@@ -1,0 +1,3 @@
+# Copia este archivo como .dev.vars (no se versiona) y define tu clave local.
+# cp .dev.vars.example .dev.vars
+API_KEY=cambia-esta-clave-local

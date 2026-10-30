@@ -1,0 +1,14 @@
+{
+  // Configuración principal del Worker.
+  // Documentación: https://developers.cloudflare.com/workers/wrangler/configuration/
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "cloudflare-llamadas-demo",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-10-01",
+  "observability": {
+    "enabled": true
+  }
+  // El secreto API_KEY NO se define aquí.
+  //  - Local:      archivo .dev.vars (ver .dev.vars.example)
+  //  - Producción: npx wrangler secret put API_KEY
+}
