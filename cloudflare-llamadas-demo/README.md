@@ -81,37 +81,52 @@ Registros de prueba disponibles: `llamada_id` 1 (candidato Miguel Maldonado, ref
 
 Guarda las respuestas obtenidas en una llamada. Se almacenan en Workers KV bajo la clave `respuestas:{llamada_id}`; un segundo POST para la misma llamada sobrescribe el anterior.
 
+La estructura es **plana**, con un campo por pregunta, porque el agente que consume la API no puede enviar listas:
+
 ```json
 {
   "llamada_id": 2,
-  "respuestas": [
-    { "pregunta": 1, "texto": "¿Confirma que trabajó con usted?", "respuesta": "Sí" },
-    { "pregunta": 2, "texto": "¿En qué periodo?", "respuesta": "Marzo 2023 a agosto 2025" },
-    { "pregunta": 3, "texto": "...", "respuesta": "..." },
-    { "pregunta": 4, "texto": "...", "respuesta": "..." },
-    { "pregunta": 5, "texto": "...", "respuesta": "..." },
-    { "pregunta": 6, "texto": "...", "respuesta": "..." },
-    { "pregunta": 7, "texto": "...", "respuesta": "..." },
-    { "pregunta": 8, "texto": "...", "respuesta": "..." },
-    { "pregunta": 9, "texto": "...", "respuesta": "..." }
-  ]
+  "pregunta_1": "¿Confirma que trabajó con usted?",
+  "respuesta_1": "Sí",
+  "pregunta_2": "¿En qué periodo?",
+  "respuesta_2": "Marzo 2023 a agosto 2025",
+  "pregunta_3": "...",
+  "respuesta_3": "...",
+  "pregunta_4": "...",
+  "respuesta_4": "...",
+  "pregunta_5": "...",
+  "respuesta_5": "...",
+  "pregunta_6": "...",
+  "respuesta_6": "...",
+  "pregunta_7": "...",
+  "respuesta_7": "...",
+  "pregunta_8": "...",
+  "respuesta_8": "...",
+  "pregunta_9": "...",
+  "respuesta_9": "..."
 }
 ```
 
 Reglas de validación:
 
 - `llamada_id` debe ser un entero positivo y la llamada debe existir (si no, 404 `LLAMADA_NO_ENCONTRADA`).
-- `respuestas` debe traer exactamente 9 elementos, con `pregunta` del 1 al 9 sin repetir y `texto` y `respuesta` como cadenas (máximo 2000 caracteres). Si no, 400 `RESPUESTAS_INVALIDAS` con un mensaje que indica el problema.
+- `respuesta_1` a `respuesta_9` son **obligatorias**. Se acepta texto, número o booleano y se guarda como texto (máximo 2000 caracteres). Si falta alguna, 400 `RESPUESTAS_INVALIDAS` con la lista de campos faltantes.
+- `pregunta_1` a `pregunta_9` son **opcionales** (el texto de la pregunta). Si no se envían, se guardan como `null`.
+- Los campos desconocidos se ignoran.
 - El número de preguntas se define en la constante `NUM_PREGUNTAS` de [src/types/respuestas.ts](src/types/respuestas.ts).
 
-Responde 201 con el registro guardado, ordenado por número de pregunta y con la fecha de recepción:
+Responde 201 con el registro guardado, con la misma estructura plana y la fecha de recepción:
 
 ```json
 {
   "success": true,
   "data": {
     "llamada_id": 2,
-    "respuestas": [ ... ],
+    "respuesta_1": "Sí",
+    "pregunta_1": "¿Confirma que trabajó con usted?",
+    "respuesta_2": "Marzo 2023 a agosto 2025",
+    "pregunta_2": "¿En qué periodo?",
+    "...": "...",
     "recibido_en": "2026-10-30T23:40:12.345Z"
   }
 }
@@ -208,7 +223,7 @@ Todos los errores comparten el mismo formato:
 | ---- | ----------------------- | --------------------------------------------------- |
 | 400  | `ID_INVALIDO`           | El identificador no es un entero positivo (o falta `llamada_id` en el POST) |
 | 400  | `CUERPO_INVALIDO`       | El cuerpo del POST no es un objeto JSON válido      |
-| 400  | `RESPUESTAS_INVALIDAS`  | La lista de respuestas no cumple las reglas         |
+| 400  | `RESPUESTAS_INVALIDAS`  | Faltan respuestas o algún campo no es texto válido  |
 | 404  | `RESPUESTAS_NO_ENCONTRADAS` | No hay respuestas guardadas para esa llamada    |
 | 401  | `NO_AUTORIZADO`         | Falta el header `X-API-Key` o la clave es incorrecta |
 | 404  | `LLAMADA_NO_ENCONTRADA` | El identificador es válido pero no existe           |
@@ -219,7 +234,10 @@ Todos los errores comparten el mismo formato:
 
 ## Almacenamiento de respuestas (Workers KV)
 
-Las respuestas se guardan en un namespace de Workers KV enlazado al Worker como `RESPUESTAS`. **En local no hay que configurar nada**: `npm run dev` y `npm test` usan un KV simulado en disco (dentro de `.wrangler/`, ignorado por git).
+Las respuestas se guardan en un namespace de Workers KV enlazado al Worker como `RESPUESTAS`.
+
+- `npm test` usa **siempre** un KV simulado en disco (`remoteBindings: false` en `vitest.config.ts`), así que las pruebas nunca tocan el namespace real.
+- `npm run dev` usa el KV simulado, salvo que el binding tenga `"remote": true` en `wrangler.jsonc`; en ese caso el servidor local lee y escribe en el namespace real de Cloudflare. Útil para ver desde Postman lo mismo que ve el Worker desplegado, pero ten en cuenta que los datos son reales.
 
 Para desplegar hace falta crear el namespace una sola vez:
 

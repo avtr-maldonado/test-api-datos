@@ -5,12 +5,21 @@ const BASE = "http://localhost";
 const API_KEY = env.API_KEY as string;
 const AUTH = { "X-API-Key": API_KEY };
 
-function respuestasValidas(): Array<{ pregunta: number; texto: string; respuesta: string }> {
-  return Array.from({ length: 9 }, (_, i) => ({
-    pregunta: i + 1,
-    texto: `Pregunta ${i + 1}`,
-    respuesta: `Respuesta ${i + 1}`,
-  }));
+/** Cuerpo válido con respuesta_1..respuesta_9 y pregunta_1..pregunta_9. */
+function cuerpoValido(llamadaId: number | string = 2): Record<string, unknown> {
+  const body: Record<string, unknown> = { llamada_id: llamadaId };
+  for (let n = 1; n <= 9; n++) {
+    body[`pregunta_${n}`] = `Pregunta ${n}`;
+    body[`respuesta_${n}`] = `Respuesta ${n}`;
+  }
+  return body;
+}
+
+/** Cuerpo válido solo con las respuestas, sin textos de pregunta. */
+function soloRespuestas(llamadaId = 1): Record<string, unknown> {
+  const body: Record<string, unknown> = { llamada_id: llamadaId };
+  for (let n = 1; n <= 9; n++) body[`respuesta_${n}`] = `R${n}`;
+  return body;
 }
 
 function post(body: unknown, headers: Record<string, string> = AUTH) {
@@ -22,86 +31,119 @@ function post(body: unknown, headers: Record<string, string> = AUTH) {
 }
 
 type ErrorBody = { success: boolean; error: { code: string; message: string } };
+type Guardado = Record<string, unknown> & { llamada_id: number; recibido_en: string };
+
+async function limpiarKV() {
+  await env.RESPUESTAS.delete("respuestas:1");
+  await env.RESPUESTAS.delete("respuestas:2");
+}
 
 describe("POST /api/respuestas", () => {
-  beforeEach(async () => {
-    await env.RESPUESTAS.delete("respuestas:1");
-    await env.RESPUESTAS.delete("respuestas:2");
-  });
+  beforeEach(limpiarKV);
 
-  it("guarda 9 respuestas y devuelve 201 con el registro", async () => {
-    const res = await post({ llamada_id: 2, respuestas: respuestasValidas() });
+  it("guarda las 9 respuestas y devuelve 201 con el registro plano", async () => {
+    const res = await post(cuerpoValido(2));
     expect(res.status).toBe(201);
     expect(res.headers.get("Content-Type")).toBe("application/json; charset=utf-8");
-    const body = await res.json<{
-      success: boolean;
-      data: { llamada_id: number; respuestas: unknown[]; recibido_en: string };
-    }>();
+    const body = await res.json<{ success: boolean; data: Guardado }>();
     expect(body.success).toBe(true);
     expect(body.data.llamada_id).toBe(2);
-    expect(body.data.respuestas).toHaveLength(9);
+    for (let n = 1; n <= 9; n++) {
+      expect(body.data[`respuesta_${n}`]).toBe(`Respuesta ${n}`);
+      expect(body.data[`pregunta_${n}`]).toBe(`Pregunta ${n}`);
+    }
     expect(new Date(body.data.recibido_en).toISOString()).toBe(body.data.recibido_en);
 
     const guardado = await env.RESPUESTAS.get("respuestas:2", "json");
     expect(guardado).toEqual(body.data);
   });
 
-  it("ordena las respuestas por número de pregunta", async () => {
-    const desordenadas = respuestasValidas().reverse();
-    const res = await post({ llamada_id: 1, respuestas: desordenadas });
+  it("acepta solo las respuestas y deja las preguntas en null", async () => {
+    const res = await post(soloRespuestas(1));
     expect(res.status).toBe(201);
-    const body = await res.json<{ data: { respuestas: Array<{ pregunta: number }> } }>();
-    expect(body.data.respuestas.map((r) => r.pregunta)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9]);
+    const body = await res.json<{ data: Guardado }>();
+    for (let n = 1; n <= 9; n++) {
+      expect(body.data[`respuesta_${n}`]).toBe(`R${n}`);
+      expect(body.data[`pregunta_${n}`]).toBeNull();
+    }
+  });
+
+  it("convierte números y booleanos a texto", async () => {
+    const body = { ...soloRespuestas(1), respuesta_3: 42, respuesta_4: true, respuesta_5: "" };
+    const res = await post(body);
+    expect(res.status).toBe(201);
+    const data = (await res.json<{ data: Guardado }>()).data;
+    expect(data.respuesta_3).toBe("42");
+    expect(data.respuesta_4).toBe("true");
+    expect(data.respuesta_5).toBe("");
+  });
+
+  it("ignora campos desconocidos", async () => {
+    const res = await post({ ...soloRespuestas(1), extra: "x", respuesta_10: "no" });
+    expect(res.status).toBe(201);
+    const data = (await res.json<{ data: Guardado }>()).data;
+    expect(data).not.toHaveProperty("extra");
+    expect(data).not.toHaveProperty("respuesta_10");
   });
 
   it("sobrescribe las respuestas anteriores de la misma llamada", async () => {
-    await post({ llamada_id: 1, respuestas: respuestasValidas() });
-    const nuevas = respuestasValidas().map((r) => ({ ...r, respuesta: "Cambiada" }));
-    const res = await post({ llamada_id: 1, respuestas: nuevas });
+    await post(cuerpoValido(1));
+    const nuevas = cuerpoValido(1);
+    for (let n = 1; n <= 9; n++) nuevas[`respuesta_${n}`] = "Cambiada";
+    const res = await post(nuevas);
     expect(res.status).toBe(201);
 
     const leido = await SELF.fetch(`${BASE}/api/respuestas/1`, { headers: AUTH });
-    const body = await leido.json<{ respuestas: Array<{ respuesta: string }> }>();
-    expect(body.respuestas.every((r) => r.respuesta === "Cambiada")).toBe(true);
+    const data = await leido.json<Guardado>();
+    for (let n = 1; n <= 9; n++) expect(data[`respuesta_${n}`]).toBe("Cambiada");
   });
 
   it("acepta llamada_id como cadena de dígitos", async () => {
-    const res = await post({ llamada_id: "2", respuestas: respuestasValidas() });
+    const res = await post(cuerpoValido("2"));
     expect(res.status).toBe(201);
   });
 
   it("devuelve 404 si la llamada no existe y no guarda nada", async () => {
-    const res = await post({ llamada_id: 999, respuestas: respuestasValidas() });
+    const res = await post(cuerpoValido(999));
     expect(res.status).toBe(404);
     expect((await res.json<ErrorBody>()).error.code).toBe("LLAMADA_NO_ENCONTRADA");
     expect(await env.RESPUESTAS.get("respuestas:999")).toBeNull();
   });
 
-  it.each([
-    ["faltan respuestas", respuestasValidas().slice(0, 8)],
-    ["sobran respuestas", [...respuestasValidas(), { pregunta: 10, texto: "x", respuesta: "y" }]],
-    ["pregunta repetida", respuestasValidas().map((r, i) => (i === 8 ? { ...r, pregunta: 1 } : r))],
-    ["pregunta fuera de rango", respuestasValidas().map((r, i) => (i === 0 ? { ...r, pregunta: 0 } : r))],
-    ["falta el texto", respuestasValidas().map((r, i) => (i === 3 ? { pregunta: r.pregunta, respuesta: r.respuesta } : r))],
-    ["respuesta no es cadena", respuestasValidas().map((r, i) => (i === 5 ? { ...r, respuesta: 42 } : r))],
-    ["elemento no es objeto", respuestasValidas().map((r, i) => (i === 2 ? "texto" : r))],
-    ["no es una lista", { pregunta: 1 }],
-    ["lista vacía", []],
-  ])("devuelve 400 RESPUESTAS_INVALIDAS cuando %s", async (_caso, respuestas) => {
-    const res = await post({ llamada_id: 1, respuestas });
+  it("devuelve 400 e indica qué respuestas faltan", async () => {
+    const body = soloRespuestas(1);
+    delete body.respuesta_4;
+    delete body.respuesta_9;
+    const res = await post(body);
     expect(res.status).toBe(400);
-    const body = await res.json<ErrorBody>();
-    expect(body.error.code).toBe("RESPUESTAS_INVALIDAS");
-    expect(body.error.message).toBeTypeOf("string");
+    const err = await res.json<ErrorBody>();
+    expect(err.error.code).toBe("RESPUESTAS_INVALIDAS");
+    expect(err.error.message).toContain("respuesta_4");
+    expect(err.error.message).toContain("respuesta_9");
   });
 
-  it("devuelve 400 RESPUESTAS_INVALIDAS si falta el campo respuestas", async () => {
+  it.each([
+    ["respuesta null", { respuesta_2: null }],
+    ["respuesta objeto", { respuesta_2: { a: 1 } }],
+    ["respuesta lista", { respuesta_2: ["a"] }],
+    ["respuesta demasiado larga", { respuesta_2: "x".repeat(2001) }],
+    ["pregunta objeto", { pregunta_7: { a: 1 } }],
+    ["pregunta demasiado larga", { pregunta_7: "x".repeat(2001) }],
+  ])("devuelve 400 RESPUESTAS_INVALIDAS con %s", async (_caso, cambios) => {
+    const res = await post({ ...soloRespuestas(1), ...cambios });
+    expect(res.status).toBe(400);
+    const err = await res.json<ErrorBody>();
+    expect(err.error.code).toBe("RESPUESTAS_INVALIDAS");
+    expect(err.error.message).toBeTypeOf("string");
+  });
+
+  it("devuelve 400 RESPUESTAS_INVALIDAS si no viene ninguna respuesta", async () => {
     const res = await post({ llamada_id: 1 });
     expect(res.status).toBe(400);
     expect((await res.json<ErrorBody>()).error.code).toBe("RESPUESTAS_INVALIDAS");
   });
 
-  it.each([[{ respuestas: [] }], [{ llamada_id: "abc", respuestas: [] }], [{ llamada_id: 0, respuestas: [] }]])(
+  it.each([[{ respuesta_1: "a" }], [{ llamada_id: "abc" }], [{ llamada_id: 0 }]])(
     "devuelve 400 ID_INVALIDO para el cuerpo %j",
     async (body) => {
       const res = await post(body);
@@ -117,7 +159,7 @@ describe("POST /api/respuestas", () => {
   });
 
   it("devuelve 401 sin API Key y no guarda nada", async () => {
-    const res = await post({ llamada_id: 1, respuestas: respuestasValidas() }, {});
+    const res = await post(cuerpoValido(1), {});
     expect(res.status).toBe(401);
     expect(await env.RESPUESTAS.get("respuestas:1")).toBeNull();
   });
@@ -136,13 +178,10 @@ describe("POST /api/respuestas", () => {
 });
 
 describe("GET /api/respuestas/{llamada_id}", () => {
-  beforeEach(async () => {
-    await env.RESPUESTAS.delete("respuestas:1");
-    await env.RESPUESTAS.delete("respuestas:2");
-  });
+  beforeEach(limpiarKV);
 
   it("devuelve lo guardado por el POST", async () => {
-    const creado = await (await post({ llamada_id: 2, respuestas: respuestasValidas() })).json<{ data: unknown }>();
+    const creado = await (await post(cuerpoValido(2))).json<{ data: unknown }>();
     const res = await SELF.fetch(`${BASE}/api/respuestas/2`, { headers: AUTH });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual(creado.data);
@@ -155,7 +194,7 @@ describe("GET /api/respuestas/{llamada_id}", () => {
   });
 
   it("no devuelve respuestas de otra llamada", async () => {
-    await post({ llamada_id: 1, respuestas: respuestasValidas() });
+    await post(cuerpoValido(1));
     const res = await SELF.fetch(`${BASE}/api/respuestas/2`, { headers: AUTH });
     expect(res.status).toBe(404);
   });

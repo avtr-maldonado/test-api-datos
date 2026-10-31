@@ -1,8 +1,9 @@
 import { obtenerLlamada } from "../data/llamadas";
 import type { Env } from "../types/llamada";
 import {
+  campoPregunta,
+  campoRespuesta,
   NUM_PREGUNTAS,
-  type Respuesta,
   type RespuestasGuardadas,
 } from "../types/respuestas";
 import { badRequest, json, methodNotAllowed, notFound, options } from "../utils/responses";
@@ -21,60 +22,74 @@ function claveKV(llamadaId: number): string {
   return `respuestas:${llamadaId}`;
 }
 
-/** Resultado de validar la lista de respuestas: la lista normalizada o un mensaje de error. */
-type ValidacionRespuestas = { ok: true; respuestas: Respuesta[] } | { ok: false; mensaje: string };
+/** Campos validados y normalizados, listos para guardar. */
+type CamposRespuestas = Record<`respuesta_${number}`, string> &
+  Record<`pregunta_${number}`, string | null>;
 
-function esTextoValido(valor: unknown): valor is string {
-  return typeof valor === "string" && valor.length <= MAX_TEXTO;
+type ValidacionRespuestas = { ok: true; campos: CamposRespuestas } | { ok: false; mensaje: string };
+
+/**
+ * Convierte un valor escalar (cadena, número o booleano) a cadena.
+ * Devuelve `null` si el tipo no es admitido o el texto es demasiado largo.
+ */
+function aTexto(valor: unknown): string | null {
+  let texto: string;
+  if (typeof valor === "string") texto = valor;
+  else if (typeof valor === "number" && Number.isFinite(valor)) texto = String(valor);
+  else if (typeof valor === "boolean") texto = String(valor);
+  else return null;
+  return texto.length <= MAX_TEXTO ? texto : null;
 }
 
 /**
- * Valida que `valor` sea una lista de exactamente NUM_PREGUNTAS respuestas,
- * con números de pregunta 1..NUM_PREGUNTAS sin repetir.
- * Devuelve la lista ordenada por número de pregunta.
+ * Valida que `datos` contenga `respuesta_1` ... `respuesta_N` (obligatorias)
+ * y, opcionalmente, `pregunta_1` ... `pregunta_N`.
+ * Los campos desconocidos se ignoran.
  */
-export function validarRespuestas(valor: unknown): ValidacionRespuestas {
-  if (!Array.isArray(valor)) {
-    return { ok: false, mensaje: "El campo respuestas debe ser una lista" };
+export function validarRespuestas(datos: Record<string, unknown>): ValidacionRespuestas {
+  const campos = {} as CamposRespuestas;
+  const faltantes: string[] = [];
+
+  for (let n = 1; n <= NUM_PREGUNTAS; n++) {
+    const nombreRespuesta = campoRespuesta(n);
+    const nombrePregunta = campoPregunta(n);
+
+    if (!(nombreRespuesta in datos) || datos[nombreRespuesta] === null) {
+      faltantes.push(nombreRespuesta);
+      continue;
+    }
+    const respuesta = aTexto(datos[nombreRespuesta]);
+    if (respuesta === null) {
+      return {
+        ok: false,
+        mensaje: `El campo ${nombreRespuesta} debe ser un texto de hasta ${MAX_TEXTO} caracteres`,
+      };
+    }
+    campos[nombreRespuesta] = respuesta;
+
+    const preguntaCruda = datos[nombrePregunta];
+    if (preguntaCruda === undefined || preguntaCruda === null) {
+      campos[nombrePregunta] = null;
+    } else {
+      const pregunta = aTexto(preguntaCruda);
+      if (pregunta === null) {
+        return {
+          ok: false,
+          mensaje: `El campo ${nombrePregunta} debe ser un texto de hasta ${MAX_TEXTO} caracteres`,
+        };
+      }
+      campos[nombrePregunta] = pregunta;
+    }
   }
-  if (valor.length !== NUM_PREGUNTAS) {
+
+  if (faltantes.length > 0) {
     return {
       ok: false,
-      mensaje: `Se esperan exactamente ${NUM_PREGUNTAS} respuestas y se recibieron ${valor.length}`,
+      mensaje: `Faltan los campos obligatorios: ${faltantes.join(", ")}`,
     };
   }
 
-  const vistas = new Set<number>();
-  const normalizadas: Respuesta[] = [];
-
-  for (const [indice, item] of valor.entries()) {
-    if (typeof item !== "object" || item === null || Array.isArray(item)) {
-      return { ok: false, mensaje: `La respuesta en la posición ${indice} debe ser un objeto` };
-    }
-    const { pregunta, texto, respuesta } = item as Record<string, unknown>;
-
-    if (!Number.isInteger(pregunta) || (pregunta as number) < 1 || (pregunta as number) > NUM_PREGUNTAS) {
-      return {
-        ok: false,
-        mensaje: `La respuesta en la posición ${indice} debe tener un campo pregunta entre 1 y ${NUM_PREGUNTAS}`,
-      };
-    }
-    if (vistas.has(pregunta as number)) {
-      return { ok: false, mensaje: `La pregunta ${pregunta} aparece más de una vez` };
-    }
-    if (!esTextoValido(texto)) {
-      return { ok: false, mensaje: `La pregunta ${pregunta} debe incluir el campo texto como cadena` };
-    }
-    if (!esTextoValido(respuesta)) {
-      return { ok: false, mensaje: `La pregunta ${pregunta} debe incluir el campo respuesta como cadena` };
-    }
-
-    vistas.add(pregunta as number);
-    normalizadas.push({ pregunta: pregunta as number, texto, respuesta });
-  }
-
-  normalizadas.sort((a, b) => a.pregunta - b.pregunta);
-  return { ok: true, respuestas: normalizadas };
+  return { ok: true, campos };
 }
 
 /** Maneja `POST /api/respuestas`: valida y guarda las respuestas de una llamada en KV. */
@@ -108,7 +123,7 @@ export async function manejarGuardarRespuestas(request: Request, env: Env): Prom
     return badRequest("El identificador de la llamada debe ser un entero positivo");
   }
 
-  const validacion = validarRespuestas(datos.respuestas);
+  const validacion = validarRespuestas(datos);
   if (!validacion.ok) {
     return badRequest(validacion.mensaje, "RESPUESTAS_INVALIDAS");
   }
@@ -119,7 +134,7 @@ export async function manejarGuardarRespuestas(request: Request, env: Env): Prom
 
   const registro: RespuestasGuardadas = {
     llamada_id: llamadaId,
-    respuestas: validacion.respuestas,
+    ...validacion.campos,
     recibido_en: new Date().toISOString(),
   };
 
